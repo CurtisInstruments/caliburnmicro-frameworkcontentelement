@@ -3,18 +3,22 @@
   using System;
   using System.Collections.Generic;
   using System.Reflection;
+#if WinRT
+    using Windows.UI.Xaml;
+#else
   using System.Windows;
+#endif
 
   /// <summary>
   /// The context used during the execution of an Action or its guard.
   /// </summary>
   public class ActionExecutionContext : IDisposable
   {
-    WeakReference message;
-    WeakReference source;
-    WeakReference target;
-    WeakReference view;
-    Dictionary<string, object> values;
+    private WeakReference message;
+    private WeakReference source;
+    private WeakReference target;
+    private WeakReference view;
+    private Dictionary<string, object> values;
 
     /// <summary>
     /// Determines whether the action can execute.

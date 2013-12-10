@@ -1,6 +1,12 @@
 ﻿namespace Caliburn.Micro.FrameworkContentElement
 {
+#if WinRT
+    using System.Linq;
+    using Windows.UI.Xaml;
+    using System.Reflection;
+#else
   using System.Windows;
+#endif
 
   /// <summary>
   ///   A host for action related attached properties.
@@ -17,7 +23,7 @@
             "Target",
             typeof(object),
             typeof(Action),
-            new PropertyMetadata(OnTargetChanged)
+            new PropertyMetadata(null, OnTargetChanged)
             );
 
     /// <summary>
@@ -28,7 +34,7 @@
             "TargetWithoutContext",
             typeof(object),
             typeof(Action),
-            new PropertyMetadata(OnTargetWithoutContextChanged)
+            new PropertyMetadata(null, OnTargetWithoutContextChanged)
             );
 
     /// <summary>
@@ -106,11 +112,12 @@
       var context = new ActionExecutionContext
       {
         Target = target,
+#if WinRT
+                Method = target.GetType().GetRuntimeMethods().Single(m => m.Name == methodName),
+#else
         Method = target.GetType().GetMethod(methodName),
-        Message = new ActionMessage
-        {
-          MethodName = methodName
-        },
+#endif
+        Message = new ActionMessage { MethodName = methodName },
         View = view,
         Source = source,
         EventArgs = eventArgs
@@ -136,14 +143,13 @@
 
     static void SetTargetCore(DependencyPropertyChangedEventArgs e, DependencyObject d, bool setContext)
     {
-      if (e.NewValue == e.OldValue || e.NewValue == null)
+      if (e.NewValue == e.OldValue)
       {
         return;
       }
 
       var target = e.NewValue;
       var containerKey = e.NewValue as string;
-
       if (containerKey != null)
       {
         target = IoC.GetInstance(null, containerKey);

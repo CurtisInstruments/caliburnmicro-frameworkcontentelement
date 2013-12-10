@@ -5,7 +5,6 @@
   using System.Linq;
   using System.Reflection;
   using System.Collections.Generic;
-
 #if !SILVERLIGHT
   using System.ComponentModel;
 #endif
@@ -19,12 +18,13 @@
     /// The special parameter values recognized by the message binder along with their resolvers.
     /// </summary>
     public static readonly Dictionary<string, Func<ActionExecutionContext, object>> SpecialValues =
-        new Dictionary<string, Func<ActionExecutionContext, object>>{
-                { "$eventargs", c => c.EventArgs },
-                { "$datacontext", c => c.Source.DataContext },
-                { "$source", c => c.Source },
-                { "$executioncontext", c => c },
-                { "$view", c => c.View }
+        new Dictionary<string, Func<ActionExecutionContext, object>>
+            {
+                {"$eventargs", c => c.EventArgs},
+                {"$datacontext", c => c.Source.DataContext},
+                {"$source", c => c.Source},
+                {"$executioncontext", c => c},
+                {"$view", c => c.View}
             };
 
     /// <summary>
@@ -32,9 +32,10 @@
     /// The converter is passed the existing value to convert and a "context" object.
     /// </summary>
     public static readonly Dictionary<Type, Func<object, object, object>> CustomConverters =
-        new Dictionary<Type, Func<object, object, object>> {
+        new Dictionary<Type, Func<object, object, object>>
+            {
                 {
-                    typeof(DateTime), (value, context) => {
+                    typeof (DateTime), (value, context) => {
                         DateTime result;
                         DateTime.TryParse(value.ToString(), out result);
                         return result;
@@ -50,7 +51,7 @@
     /// <returns>The actual parameter values.</returns>
     public static object[] DetermineParameters(ActionExecutionContext context, ParameterInfo[] requiredParameters)
     {
-      var providedValues = context.Message.Parameters.Select(x => x.Value).ToArray();
+      var providedValues = context.Message.Parameters.OfType<Parameter>().Select(x => x.Value).ToArray();
       var finalValues = new object[requiredParameters.Length];
 
       for (int i = 0; i < requiredParameters.Length; i++)
@@ -60,7 +61,8 @@
         var parameterAsString = parameterValue as string;
 
         if (parameterAsString != null)
-          finalValues[i] = CoerceValue(parameterType, EvaluateParameter(parameterAsString, parameterType, context), context);
+          finalValues[i] = CoerceValue(parameterType,
+              EvaluateParameter(parameterAsString, parameterType, context), context);
         else finalValues[i] = CoerceValue(parameterType, parameterValue, context);
       }
 
@@ -70,12 +72,17 @@
     /// <summary>
     /// Transforms the textual parameter into the actual parameter.
     /// </summary>
-    public static Func<string, Type, ActionExecutionContext, object> EvaluateParameter = (text, parameterType, context) =>
-    {
-      var lookup = text.ToLower(CultureInfo.InvariantCulture);
-      Func<ActionExecutionContext, object> resolver;
-      return SpecialValues.TryGetValue(lookup, out resolver) ? resolver(context) : text;
-    };
+    public static Func<string, Type, ActionExecutionContext, object> EvaluateParameter =
+        (text, parameterType, context) =>
+        {
+#if WinRT
+            var lookup = text.ToLower();
+#else
+          var lookup = text.ToLower(CultureInfo.InvariantCulture);
+#endif
+          Func<ActionExecutionContext, object> resolver;
+          return SpecialValues.TryGetValue(lookup, out resolver) ? resolver(context) : text;
+        };
 
     /// <summary>
     /// Coerces the provided value to the destination type.
@@ -104,6 +111,7 @@
 
       try
       {
+#if !WinRT
         var converter = TypeDescriptor.GetConverter(destinationType);
 
         if (converter.CanConvertFrom(providedType))
@@ -117,9 +125,13 @@
         {
           return converter.ConvertTo(providedValue, destinationType);
         }
-
+#endif
+#if WinRT
+                if (destinationType.GetTypeInfo().IsEnum) {
+#else
         if (destinationType.IsEnum)
         {
+#endif
           var stringValue = providedValue as string;
           if (stringValue != null)
           {
@@ -145,7 +157,7 @@
 
       try
       {
-        return Convert.ChangeType(providedValue, destinationType, CultureInfo.CurrentUICulture);
+        return Convert.ChangeType(providedValue, destinationType, CultureInfo.CurrentCulture);
       }
       catch
       {
@@ -160,7 +172,12 @@
     /// <returns>The default value.</returns>
     public static object GetDefaultValue(Type type)
     {
+#if WinRT
+            var typeInfo = type.GetTypeInfo();
+            return typeInfo.IsClass || typeInfo.IsInterface ? null : System.Activator.CreateInstance(type);
+#else
       return type.IsClass || type.IsInterface ? null : Activator.CreateInstance(type);
+#endif
     }
   }
 }

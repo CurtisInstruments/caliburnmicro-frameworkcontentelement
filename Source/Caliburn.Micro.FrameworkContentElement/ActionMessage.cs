@@ -5,6 +5,27 @@
   using System.ComponentModel;
   using System.Linq;
   using System.Reflection;
+#if WinRT && !WinRT81
+    using Windows.UI.Xaml;
+    using Windows.UI.Xaml.Data;
+    using Windows.UI.Interactivity;
+    using Windows.UI.Xaml.Markup;
+    using Windows.UI.Xaml.Media;
+    using Windows.UI.Xaml.Controls.Primitives;
+    using Windows.UI.Xaml.Controls;
+    using TriggerBase = Windows.UI.Interactivity.TriggerBase;
+    using EventTrigger = Windows.UI.Interactivity.EventTrigger;
+    using TriggerAction = Windows.UI.Interactivity.TriggerAction;
+#elif WinRT81
+    using Windows.UI.Xaml;
+    using Windows.UI.Xaml.Data;
+    using Windows.UI.Xaml.Markup;
+    using Windows.UI.Xaml.Media;
+    using Windows.UI.Xaml.Controls;
+    using Microsoft.Xaml.Interactivity;
+    using TriggerBase = Microsoft.Xaml.Interactivity.IBehavior;
+    using EventTrigger = Microsoft.Xaml.Interactions.Core.EventTriggerBehavior;
+#else
   using System.Windows;
   using System.Windows.Controls;
   using System.Windows.Controls.Primitives;
@@ -13,28 +34,33 @@
   using System.Windows.Markup;
   using System.Windows.Media;
   using EventTrigger = System.Windows.Interactivity.EventTrigger;
+#endif
 
   /// <summary>
   /// Used to send a message from the UI to a presentation model class, indicating that a particular Action should be invoked.
   /// </summary>
-  [DefaultTrigger(typeof(System.Windows.FrameworkContentElement), typeof(EventTrigger), "MouseLeftButtonDown")]
+#if WinRT
+    [ContentProperty(Name = "Parameters")]
+#else
   [ContentProperty("Parameters")]
+  [DefaultTrigger(typeof(System.Windows.FrameworkContentElement), typeof(EventTrigger), "MouseLeftButtonDown")]
+  [DefaultTrigger(typeof(ButtonBase), typeof(EventTrigger), "Click")]
   [TypeConstraint(typeof(System.Windows.FrameworkContentElement))]
+#endif
   public class ActionMessage : TriggerAction<System.Windows.FrameworkContentElement>, IHaveParameters
   {
     static readonly ILog Log = LogManager.GetLog(typeof(ActionMessage));
     ActionExecutionContext context;
 
-#if WP71
-        internal AppBarButton buttonSource;
-        internal AppBarMenuItem menuItemSource;
+#if WINDOWS_PHONE
+        internal Microsoft.Phone.Shell.IApplicationBarMenuItem applicationBarSource;
 #endif
 
     internal static readonly DependencyProperty HandlerProperty = DependencyProperty.RegisterAttached(
         "Handler",
         typeof(object),
         typeof(ActionMessage),
-        new PropertyMetadata(HandlerPropertyChanged)
+        new PropertyMetadata(null, HandlerPropertyChanged)
         );
 
     ///<summary>
@@ -83,7 +109,9 @@
     /// Gets or sets the name of the method to be invoked on the presentation model class.
     /// </summary>
     /// <value>The name of the method.</value>
+#if !WinRT
     [Category("Common Properties")]
+#endif
     public string MethodName
     {
       get { return (string)GetValue(MethodNameProperty); }
@@ -94,7 +122,9 @@
     /// Gets the parameters to pass as part of the method invocation.
     /// </summary>
     /// <value>The parameters.</value>
+#if !WinRT
     [Category("Common Properties")]
+#endif
     public AttachedCollection<Parameter> Parameters
     {
       get { return (AttachedCollection<Parameter>)GetValue(ParametersProperty); }
@@ -108,6 +138,32 @@
     /// <summary>
     /// Called after the action is attached to an AssociatedObject.
     /// </summary>
+#if WinRT81
+        protected override void OnAttached() {
+            if (!Caliburn.Micro.Execute.InDesignMode) {
+                Parameters.Attach(AssociatedObject);
+                Parameters.OfType<Parameter>().Apply(x => x.MakeAwareOf(this));
+
+                
+                if (View.ExecuteOnLoad(AssociatedObject, ElementLoaded)) {
+                    // Not yet sure if this will be needed
+                    //var trigger = Interaction.GetTriggers(AssociatedObject)
+                    //    .FirstOrDefault(t => t.Actions.Contains(this)) as EventTrigger;
+                    //if (trigger != null && trigger.EventName == "Loaded")
+                    //    Invoke(new RoutedEventArgs());
+                }
+
+                View.ExecuteOnUnload(AssociatedObject, ElementUnloaded);
+            }
+
+            base.OnAttached();
+        }
+
+        void ElementUnloaded(object sender, RoutedEventArgs e)
+        {
+            OnDetaching();
+        }
+#else
     protected override void OnAttached()
     {
       if (!Execute.InDesignMode)
@@ -126,6 +182,7 @@
 
       base.OnAttached();
     }
+#endif
 
     static void HandlerPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -137,7 +194,7 @@
     /// </summary>
     protected override void OnDetaching()
     {
-      if (!Execute.InDesignMode)
+      if (!Caliburn.Micro.Execute.InDesignMode)
       {
         Detaching(this, EventArgs.Empty);
         AssociatedObject.Loaded -= ElementLoaded;
@@ -160,7 +217,7 @@
           if (Action.HasTargetSet(currentElement))
             break;
 
-          currentElement = FCETreeHelper.GetParent(currentElement);
+          currentElement = VisualTreeHelper.GetParent(currentElement);
         }
       }
       else currentElement = context.View;
@@ -171,13 +228,16 @@
         Path = new PropertyPath(Message.HandlerProperty),
         Source = currentElement
       };
+#elif WinRT
+            var binding = new Binding {
+                Source = currentElement
+            };
 #else
-            const string bindingText = "<Binding xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation\' xmlns:cal='clr-namespace:Caliburn.Micro;assembly=Caliburn.Micro' Path='(cal:Message.Handler)' />";
+            const string bindingText = "<Binding xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation\' xmlns:cal='clr-namespace:Caliburn.Micro;assembly=Caliburn.Micro.Platform' Path='(cal:Message.Handler)' />";
 
             var binding = (Binding)XamlReader.Load(bindingText);
             binding.Source = currentElement;
 #endif
-
       BindingOperations.SetBinding(this, HandlerProperty, binding);
     }
 
@@ -288,6 +348,12 @@
       var values = MessageBinder.DetermineParameters(context, context.Method.GetParameters());
       var returnValue = context.Method.Invoke(context.Target, values);
 
+      var task = returnValue as System.Threading.Tasks.Task;
+      if (task != null)
+      {
+        returnValue = task.AsResult();
+      }
+
       var result = returnValue as IResult;
       if (result != null)
       {
@@ -297,11 +363,19 @@
       var enumerable = returnValue as IEnumerable<IResult>;
       if (enumerable != null)
       {
-        Coroutine.BeginExecute(enumerable.GetEnumerator(), context);
+        returnValue = enumerable.GetEnumerator();
       }
-      else if (returnValue is IEnumerator<IResult>)
+
+      var enumerator = returnValue as IEnumerator<IResult>;
+      if (enumerator != null)
       {
-        Coroutine.BeginExecute((IEnumerator<IResult>)returnValue, context);
+        Coroutine.BeginExecute(enumerator,
+            new CoroutineExecutionContext
+            {
+              Source = context.Source,
+              View = context.View,
+              Target = context.Target
+            });
       }
     };
 
@@ -311,27 +385,21 @@
     /// <remarks>Returns a value indicating whether or not the action is available.</remarks>
     public static Func<ActionExecutionContext, bool> ApplyAvailabilityEffect = context =>
     {
-#if WP71
-            if (context.Message.buttonSource != null) {
+#if WINDOWS_PHONE
+            if (context.Message.applicationBarSource != null) {
                 if(context.CanExecute != null)
-                    context.Message.buttonSource.IsEnabled = context.CanExecute();
-                return context.Message.buttonSource.IsEnabled;
-            }
-
-            if (context.Message.menuItemSource != null) {
-                if(context.CanExecute != null)
-                    context.Message.menuItemSource.IsEnabled = context.CanExecute();
-                return context.Message.menuItemSource.IsEnabled;
+                    context.Message.applicationBarSource.IsEnabled = context.CanExecute();
+                return context.Message.applicationBarSource.IsEnabled;
             }
 #endif
 
-#if SILVERLIGHT
+#if SILVERLIGHT || WinRT
             if (!(context.Source is Control)) {
                 return true;
             }
 #endif
 
-#if SILVERLIGHT
+#if SILVERLIGHT || WinRT
             var source = (Control)context.Source;
             if (ConventionManager.HasBinding(source, Control.IsEnabledProperty)) {
                 return source.IsEnabled;
@@ -359,11 +427,19 @@
     /// <returns>The matching method, if available.</returns>
     public static Func<ActionMessage, object, MethodInfo> GetTargetMethod = (message, target) =>
     {
+#if WinRT
+            return (from method in target.GetType().GetRuntimeMethods()
+                    where method.Name == message.MethodName
+                    let methodParameters = method.GetParameters()
+                    where message.Parameters.Count == methodParameters.Length
+                    select method).FirstOrDefault();
+#else
       return (from method in target.GetType().GetMethods()
               where method.Name == message.MethodName
               let methodParameters = method.GetParameters()
               where message.Parameters.Count == methodParameters.Length
               select method).FirstOrDefault();
+#endif
     };
 
     /// <summary>
@@ -371,8 +447,9 @@
     /// </summary>
     public static Action<ActionExecutionContext> SetMethodBinding = context =>
     {
-      DependencyObject currentElement = context.Source;
+      var source = context.Source;
 
+      DependencyObject currentElement = source;
       while (currentElement != null)
       {
         if (Action.HasTargetSet(currentElement))
@@ -399,16 +476,16 @@
         currentElement = FCETreeHelper.GetParent(currentElement);
       }
 
-      if (context.Source.DataContext != null)
+      if (source != null && source.DataContext != null)
       {
-        var target = context.Source.DataContext;
+        var target = source.DataContext;
         var method = GetTargetMethod(context.Message, target);
 
         if (method != null)
         {
           context.Target = target;
           context.Method = method;
-          context.View = context.Source;
+          context.View = source;
         }
       }
     };
@@ -433,8 +510,11 @@
         var inpc = context.Target as INotifyPropertyChanged;
         if (inpc == null)
           return;
-
+#if WinRT
+                guard = targetType.GetRuntimeMethods().SingleOrDefault(m => m.Name == "get_" + guardName);
+#else
         guard = targetType.GetMethod("get_" + guardName);
+#endif
         if (guard == null)
           return;
 
@@ -443,12 +523,16 @@
         {
           if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == guardName)
           {
-            if (context.Message == null)
+            Caliburn.Micro.Execute.OnUIThread(() =>
             {
-              inpc.PropertyChanged -= handler;
-              return;
-            }
-            context.Message.UpdateAvailability();
+              var message = context.Message;
+              if (message == null)
+              {
+                inpc.PropertyChanged -= handler;
+                return;
+              }
+              message.UpdateAvailability();
+            });
           }
         };
 
@@ -474,13 +558,38 @@
     /// <returns>A MethodInfo, if found; null otherwise</returns>
     static MethodInfo TryFindGuardMethod(ActionExecutionContext context)
     {
+#if WinRT
+            var guardName = "Can" + context.Method.Name;
+            var targetType = context.Target.GetType();
+            var guard = targetType.GetRuntimeMethods().SingleOrDefault(m => m.Name == guardName);
+
+            if (guard == null) return null;
+            if (guard.ContainsGenericParameters) return null;
+            if (!typeof(bool).Equals(guard.ReturnType)) return null;
+
+            var guardPars = guard.GetParameters();
+            var actionPars = context.Method.GetParameters();
+            if (guardPars.Length == 0) return guard;
+            if (guardPars.Length != actionPars.Length) return null;
+
+            var comparisons = guardPars.Zip(
+                context.Method.GetParameters(),
+                (x, y) => x.ParameterType.Equals(y.ParameterType)
+                );
+
+            if (comparisons.Any(x => !x)) {
+                return null;
+            }
+
+            return guard;
+#else
       var guardName = "Can" + context.Method.Name;
       var targetType = context.Target.GetType();
       var guard = targetType.GetMethod(guardName);
 
       if (guard == null) return null;
       if (guard.ContainsGenericParameters) return null;
-      if (!typeof(bool).Equals(guard.ReturnType)) return null;
+      if (typeof(bool) != guard.ReturnType) return null;
 
       var guardPars = guard.GetParameters();
       var actionPars = context.Method.GetParameters();
@@ -489,7 +598,7 @@
 
       var comparisons = guardPars.Zip(
           context.Method.GetParameters(),
-          (x, y) => x.ParameterType.Equals(y.ParameterType)
+          (x, y) => x.ParameterType == y.ParameterType
           );
 
       if (comparisons.Any(x => !x))
@@ -498,6 +607,7 @@
       }
 
       return guard;
+#endif
     }
   }
 }

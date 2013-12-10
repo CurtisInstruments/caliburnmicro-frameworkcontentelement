@@ -1,1 +1,2 @@
 NuGet Push *.nupkg
+pause

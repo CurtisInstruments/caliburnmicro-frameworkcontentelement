@@ -2,9 +2,17 @@
 {
   using System;
   using System.Linq;
+#if WinRT
+    using System.Reflection;
+    using Windows.UI.Xaml;
+    using Windows.UI.Xaml.Controls;
+    using Windows.UI.Xaml.Markup;
+    using Windows.UI.Xaml.Media;
+#else
   using System.Windows;
   using System.Windows.Controls;
   using System.Windows.Markup;
+#endif
 
   /// <summary>
   /// Hosts attached properties related to view models.
@@ -12,12 +20,11 @@
   public static class View
   {
     static readonly ILog Log = LogManager.GetLog(typeof(View));
+#if WinRT
+        const string DefaultContentPropertyName = "Content";
+#else
     static readonly ContentPropertyAttribute DefaultContentProperty = new ContentPropertyAttribute("Content");
-
-    /// <summary>
-    /// The default view context.
-    /// </summary>
-    public static readonly object DefaultContext = new object();
+#endif
 
     /// <summary>
     /// A dependency property which allows the framework to track whether a certain element has already been loaded in certain scenarios.
@@ -60,7 +67,7 @@
             "Context",
             typeof(object),
             typeof(View),
-            new PropertyMetadata(OnContextChanged)
+            new PropertyMetadata(null, OnContextChanged)
             );
 
     /// <summary>
@@ -71,7 +78,7 @@
             "Model",
             typeof(object),
             typeof(View),
-            new PropertyMetadata(OnModelChanged)
+            new PropertyMetadata(null, OnModelChanged)
             );
 
     /// <summary>
@@ -82,7 +89,7 @@
             "IsGenerated",
             typeof(bool),
             typeof(View),
-            new PropertyMetadata(false, null)
+            new PropertyMetadata(false)
             );
 
     /// <summary>
@@ -94,29 +101,97 @@
     public static bool ExecuteOnLoad(System.Windows.FrameworkContentElement element, RoutedEventHandler handler)
     {
 #if SILVERLIGHT
-            if((bool)element.GetValue(IsLoadedProperty))
+            if ((bool)element.GetValue(IsLoadedProperty)) {
+#elif WinRT
+            if (IsElementLoaded(element)) {
 #else
       if (element.IsLoaded)
-#endif
       {
+#endif
         handler(element, new RoutedEventArgs());
         return true;
       }
-      else
-      {
-        RoutedEventHandler loaded = null;
-        loaded = (s, e) =>
-        {
-#if SILVERLIGHT
-                    element.SetValue(IsLoadedProperty, true);
-#endif
-          handler(s, e);
-          element.Loaded -= loaded;
-        };
 
-        element.Loaded += loaded;
-        return false;
-      }
+      RoutedEventHandler loaded = null;
+      loaded = (s, e) =>
+      {
+        element.Loaded -= loaded;
+#if SILVERLIGHT
+                element.SetValue(IsLoadedProperty, true);
+#endif
+        handler(s, e);
+      };
+      element.Loaded += loaded;
+      return false;
+    }
+
+    /// <summary>
+    /// Executes the handler when the element is unloaded.
+    /// </summary>
+    /// <param name="element">The element.</param>
+    /// <param name="handler">The handler.</param>
+    public static void ExecuteOnUnload(FrameworkElement element, RoutedEventHandler handler)
+    {
+      RoutedEventHandler unloaded = null;
+      unloaded = (s, e) =>
+      {
+        element.Unloaded -= unloaded;
+        handler(s, e);
+      };
+      element.Unloaded += unloaded;
+    }
+
+#if WinRT
+        /// <summary>
+        /// Determines whether the specified <paramref name="element"/> is loaded.
+        /// </summary>
+        /// <param name="element">The element.</param>
+        /// <returns>true if the element is loaded; otherwise, false.
+        /// </returns>
+        public static bool IsElementLoaded(FrameworkElement element) {
+            try
+            {
+                if ((element.Parent ?? VisualTreeHelper.GetParent(element)) != null)
+                {
+                    return true;
+                }
+
+                var rootVisual = Window.Current.Content;
+
+                if (rootVisual != null)
+                {
+                    return element == rootVisual;
+                }
+
+                return false;
+
+            }
+            catch
+            {
+                return false;
+            }
+        }
+#endif
+
+    /// <summary>
+    /// Executes the handler the next time the elements's LayoutUpdated event fires.
+    /// </summary>
+    /// <param name="element">The element.</param>
+    /// <param name="handler">The handler.</param>
+#if WinRT
+        public static void ExecuteOnLayoutUpdated(FrameworkElement element, EventHandler<object> handler) {
+            EventHandler<object> onLayoutUpdate = null;
+#else
+    public static void ExecuteOnLayoutUpdated(FrameworkElement element, EventHandler handler)
+    {
+      EventHandler onLayoutUpdate = null;
+#endif
+      onLayoutUpdate = (s, e) =>
+      {
+        element.LayoutUpdated -= onLayoutUpdate;
+        handler(s, e);
+      };
+      element.LayoutUpdated += onLayoutUpdate;
     }
 
     /// <summary>
@@ -143,13 +218,20 @@
         {
           return ((ContentControl)dependencyObject).Content;
         }
+#if WinRT
+                var type = dependencyObject.GetType();
+                var contentPropertyName = GetContentPropertyName(type);
 
+                return type.GetRuntimeProperty(contentPropertyName)
+                    .GetValue(dependencyObject, null);
+#else
         var type = dependencyObject.GetType();
         var contentProperty = type.GetAttributes<ContentPropertyAttribute>(true)
                                   .FirstOrDefault() ?? DefaultContentProperty;
 
         return type.GetProperty(contentProperty.Name)
             .GetValue(dependencyObject, null);
+#endif
       }
 
       return dependencyObject;
@@ -266,6 +348,30 @@
       SetContentPropertyCore(targetLocation, view);
     }
 
+#if WinRT
+        static void SetContentPropertyCore(object targetLocation, object view) {
+            try {
+                var type = targetLocation.GetType();
+                var contentPropertyName = GetContentPropertyName(type);
+
+                type.GetRuntimeProperty(contentPropertyName)
+                    .SetValue(targetLocation, view, null);
+            }
+            catch (Exception e) {
+                Log.Error(e);
+            }
+        }
+
+        private static string GetContentPropertyName(Type type) {
+            var typeInfo = type.GetTypeInfo();
+            var contentProperty = typeInfo.CustomAttributes
+                .FirstOrDefault(a => a.AttributeType == typeof(ContentPropertyAttribute));
+
+            return contentProperty == null ?
+                DefaultContentPropertyName :
+                contentProperty.NamedArguments[0].TypedValue.Value.ToString();
+        }
+#else
     static void SetContentPropertyCore(object targetLocation, object view)
     {
       try
@@ -282,5 +388,6 @@
         Log.Error(e);
       }
     }
+#endif
   }
 }
