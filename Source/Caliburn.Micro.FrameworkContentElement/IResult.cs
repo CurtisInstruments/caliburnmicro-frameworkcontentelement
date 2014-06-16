@@ -1,33 +1,32 @@
 ﻿namespace Caliburn.Micro.FrameworkContentElement
 {
-  using System;
-
-  /// <summary>
-  /// Allows custom code to execute after the return of a action.
-  /// </summary>
-  public interface IResult
-  {
-    /// <summary>
-    /// Executes the result using the specified context.
-    /// </summary>
-    /// <param name="context">The context.</param>
-    void Execute(CoroutineExecutionContext context);
+    using System;
 
     /// <summary>
-    /// Occurs when execution has completed.
+    /// Allows custom code to execute after the return of a action.
     /// </summary>
-    event EventHandler<ResultCompletionEventArgs> Completed;
-  }
+    public interface IResult {
+        /// <summary>
+        /// Executes the result using the specified context.
+        /// </summary>
+        /// <param name="context">The context.</param>
+        void Execute(CoroutineExecutionContext context);
 
-  /// <summary>
-  /// Allows custom code to execute after the return of a action.
-  /// </summary>
-  /// <typeparam name="TResult">The type of the result.</typeparam>
-  public interface IResult<out TResult> : IResult
-  {
+        /// <summary>
+        /// Occurs when execution has completed.
+        /// </summary>
+        event EventHandler<ResultCompletionEventArgs> Completed;
+    }
+
     /// <summary>
-    /// Gets the result of the asynchronous operation.
+    /// Allows custom code to execute after the return of a action.
     /// </summary>
-    TResult Result { get; }
-  }
+    /// <typeparam name="TResult">The type of the result.</typeparam>
+    public interface IResult<out TResult> : IResult
+    {
+        /// <summary>
+        /// Gets the result of the asynchronous operation.
+        /// </summary>
+        TResult Result { get; }
+    }
 }
