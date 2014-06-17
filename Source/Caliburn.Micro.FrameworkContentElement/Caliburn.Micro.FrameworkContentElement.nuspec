@@ -10,7 +10,7 @@
     <projectUrl>http://calmicrofce.codeplex.com/</projectUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>$description$</description>
-    <releaseNotes>Updated version based on Caliburn.Micro v2.0.0. Targeted framework version: 4.5.</releaseNotes>
+    <releaseNotes>Fixed some assembly version issues found in v2.0.0.3.</releaseNotes>
     <copyright>Copyright 2012-2014 by $author$</copyright>
     <tags>Caliburn.Micro DevExpress FrameworkContentElement WPF</tags>
     <dependencies>
